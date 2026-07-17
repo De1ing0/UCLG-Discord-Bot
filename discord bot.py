@@ -15,16 +15,13 @@ category_id = int(os.getenv('category_id'))
 sort_code = os.getenv('sort_code')
 account_number = os.getenv('account_number')
 name_on_account = os.getenv('name_on_account')
-
 LOBBY_DATA_FILE = "lobby_channels.json"
-
 def save_lobby_channels():
-    """Save lobby channels to JSON file"""
+    # Save lobby channels to JSON file in case of a failure or restart
     with open(LOBBY_DATA_FILE, 'w') as f:
         json.dump(lobby_channels, f, indent=2)
-
 def load_lobby_channels():
-    """Load lobby channels from JSON file"""
+    # Load lobby channels from JSON file if it exists to restore state after a bot restart
     global lobby_channels
     if Path(LOBBY_DATA_FILE).exists():
         with open(LOBBY_DATA_FILE, 'r') as f:
@@ -32,11 +29,14 @@ def load_lobby_channels():
             # Convert string keys back to integers (JSON keys are always strings)
             lobby_channels = {int(k): v for k, v in lobby_channels.items()}
 
+# basically used only for sync command and then discord ui can be used for everything else
 bot = commands.Bot(command_prefix="pdg!", intents=discord.Intents.all())
 
 lobby_channels = {}  # Maps lobby channel IDs to role IDs
 temp_channels = {}   # Maps temporary channel IDs to their corresponding lobby channel IDs
 
+
+# Payment confirmation button
 class PaymentConfirmationView(discord.ui.View):
     def __init__(self, item_name: str, admin_user_id: int):
         super().__init__(timeout=None)
@@ -48,7 +48,7 @@ class PaymentConfirmationView(discord.ui.View):
         admin_channel = interaction.client.get_channel(admin_channel_id)
         if admin_channel:
             await admin_channel.send(
-                f"🔔<@{self.admin_user_id}>, member {interaction.user.mention} has just paid for **{self.item_name}**.\n"
+                f"<@{self.admin_user_id}>, member {interaction.user.mention} has just paid for **{self.item_name}**.\n"
                 f"Check their proof of payment here: {interaction.channel.mention}"
             )
             await interaction.response.send_message("Thank you for your purchase! Admin has been notified.", ephemeral=True)
@@ -57,6 +57,7 @@ class PaymentConfirmationView(discord.ui.View):
         else:
             await interaction.response.send_message("Error: Admin channel could not be found.", ephemeral=True)
 
+# Payment button
 class EmbedItemPage(discord.ui.View):
     def __init__(self, item_name: str, admin_user_id: int):
         super().__init__() # Timeout is 180 seconds by default
@@ -92,14 +93,14 @@ class EmbedItemPage(discord.ui.View):
         payment_view = PaymentConfirmationView(self.item_name, self.admin_user_id)
         await new_channel.send(content=user.mention, embed=welcome_embed, view=payment_view)
 
+
+# Startup + debug notifications
 @bot.event
 async def on_ready():  
     global lobby_channels
-    print('Bot is ready')
-    
+    print('Bot online')
     # Load saved lobby channels
     load_lobby_channels()
-    
     # Verify all saved channels still exist in Discord
     for guild in bot.guilds:
         channels_to_remove = []
@@ -108,20 +109,22 @@ async def on_ready():
             if channel is None:
                 # Channel was deleted, remove from tracking
                 channels_to_remove.append(channel_id)
-                print(f"Lobby channel {channel_id} not found, removing from memory")
-        
+                print(f"Parent voice channel {channel_id} not found, removing from memory")
         # Remove deleted channels
         for channel_id in channels_to_remove:
             lobby_channels.pop(channel_id, None)
-    
     # Save the cleaned-up list
     save_lobby_channels()
     
     channel = bot.get_channel(main_channel_id)
     if channel:
-        await channel.send(f"Bot online! Loaded {len(lobby_channels)} lobby channels")
+        await channel.send(f"Bot online. Loaded {len(lobby_channels)} parent voice channels.")
+        for vc in lobby_channels.keys():
+            await channel.send(f"Parent voice channel ID: {vc} is being tracked.")
 
-@app_commands.command(name="create_item", description="Create a shop item")
+
+# Create an item command in the shop channel
+@app_commands.command(name="create_item", description="Create an item in shop channel")
 async def create_item(
     interaction: discord.Interaction,
     admin_user: discord.User,
@@ -142,17 +145,18 @@ async def create_item(
         await interaction.response.send_message(f"Item posted to {shop_channel.mention}", ephemeral=True)
     except discord.Forbidden:
         await interaction.response.send_message(f"Bot doesn't have permission to send messages in {shop_channel.mention}.", ephemeral=True)
-
 bot.tree.add_command(create_item)
 
-@app_commands.command(name="setup_vc", description="Create a lobby voice channel for a role")
+
+# Create a parent voice channel for a certain role command
+@app_commands.command(name="setup_vc", description="Create a parent voice channel for a role")
 @app_commands.checks.has_permissions(manage_channels=True)
 async def setup_vc(
     interaction: discord.Interaction,
     role: discord.Role,
     category: discord.CategoryChannel
 ):
-    """Creates a lobby channel that is only visible/joinable by a specific role."""
+    # Creates a parent voice channel that is only visible/joinable by a specific role
     overwrites = {
         interaction.guild.default_role: discord.PermissionOverwrite(view_channel=False, connect=False),
         role: discord.PermissionOverwrite(view_channel=True, connect=True),
@@ -169,14 +173,103 @@ async def setup_vc(
     
     lobby_channels[lobby_channel.id] = role.id
     save_lobby_channels()
-    
     await interaction.response.send_message(f"Created parent voice chat {lobby_channel.mention} in category **{category.name}** for role **{role.name}**.", ephemeral=True)
-
 bot.tree.add_command(setup_vc)
 
+
+# Verification button
+class VerificationButton(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="Verify Membership", style=discord.ButtonStyle.green, emoji="✅")
+    async def verify_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
+        user = interaction.user
+        guild = interaction.guild
+        
+        # Create private verification channel
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(view_channel=False),
+            user: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_messages=True),
+            guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_messages=True)
+        }
+        
+        verif_channel = await guild.create_text_channel(
+            name=f"{user.name}'s-verification",
+            overwrites=overwrites,
+            category=guild.get_channel(category_id)
+        )
+        
+        await interaction.response.send_message(f"Verification channel created: {verif_channel.mention}", ephemeral=True)
+        
+        # Send form to verification channel
+        verif_embed = discord.Embed(
+            title="Membership Verification",
+            description="Please provide your name and surname so admin can verify your membership status.",
+            color=discord.Color.blue()
+        )
+        verif_form = VerificationForm(verif_channel)
+        await verif_channel.send(content=user.mention, embed=verif_embed, view=verif_form)
+
+# Verification confirmation button
+class VerificationForm(discord.ui.View):
+    def __init__(self, channel: discord.TextChannel):
+        super().__init__(timeout=None)
+        self.channel = channel
+
+    @discord.ui.button(label="Submit Name & Surname", style=discord.ButtonStyle.blurple, emoji="📝")
+    async def submit_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(NameSurnameModal(self.channel))
+
+class NameSurnameModal(discord.ui.Modal, title="Membership Verification"):
+    name = discord.ui.TextInput(label="First Name", placeholder="Enter your first name", required=True)
+    surname = discord.ui.TextInput(label="Last Name", placeholder="Enter your last name", required=True)
+
+    def __init__(self, channel: discord.TextChannel):
+        super().__init__()
+        self.channel = channel
+
+    async def on_submit(self, interaction: discord.Interaction):
+        user = interaction.user
+        admin_channel = interaction.client.get_channel(admin_channel_id)
+        
+        if admin_channel:
+            await admin_channel.send(
+                f"**New Verification Request**\n"
+                f"User: {user.mention}\n"
+                f"Name: {self.name.value}\n"
+                f"Surname: {self.surname.value}\n"
+                f"Verification Channel: {self.channel.mention}"
+            )
+        
+        await interaction.response.send_message(
+            "Your information has been submitted. Admin will verify your membership shortly.",
+            ephemeral=True
+        )
+
+
+# Create verification embed command in a given channel command
+@app_commands.command(name="create_verif", description="Create a verification button in a channel")
+async def create_verif(interaction: discord.Interaction, channel: discord.TextChannel):
+    embed = discord.Embed(
+        title="Membership Verification",
+        description="Click the button below to verify your membership status.",
+        color=discord.Color.gold()
+    )
+    view = VerificationButton()
+    
+    try:
+        await channel.send(embed=embed, view=view)
+        await interaction.response.send_message(f"Verification button posted to {channel.mention}", ephemeral=True)
+    except discord.Forbidden:
+        await interaction.response.send_message(f"Bot doesn't have permission to send messages in {channel.mention}.", ephemeral=True)
+bot.tree.add_command(create_verif)
+
+
+# Check for already created parent voice channels in case of a restart/failure
 @bot.event
 async def on_voice_state_update(member, before, after):
-    # Case 1: User joins the Lobby voice channel
+    # Case 1: User joins the Parent voice channel
     if after.channel and after.channel.id in lobby_channels:
         lobby_vc = after.channel
         allowed_role_id = lobby_channels[lobby_vc.id]
@@ -185,7 +278,7 @@ async def on_voice_state_update(member, before, after):
         if not role:
             return
 
-        # Double check if the user actually has the role (optional, since permission should prevent them joining)
+        # Double check if the user actually has the role
         if role in member.roles:
             # Overwrites for the temporary channel so only that role can access it
             overwrites = {
@@ -196,39 +289,41 @@ async def on_voice_state_update(member, before, after):
             
             temp_name = f"{member.name}'s {role.name.lower()} vc"
             
-            # Create the temporary channel in the same category as the lobby
+            # Create the temporary channel in the same category as the parent channel
             temp_vc = await member.guild.create_voice_channel(
                 name=temp_name,
                 category=lobby_vc.category,
                 overwrites=overwrites
             )
-            
-            # Record it in our tracker
+
+            # Record it in tracker
             temp_channels[temp_vc.id] = lobby_vc.id
-            
-            # Move the user instantly
+            # Move the user to the created temporary voice channel
             await member.move_to(temp_vc)
 
-    # Case 2: User leaves or switches out of a temporary voice channel
+    # Case 2: User leaves a temporary voice channel
     if before.channel and before.channel.id in temp_channels:
         temp_vc = before.channel
-        
         # Check if the channel is now completely empty
         if len(temp_vc.members) == 0:
             try:
                 await temp_vc.delete()
-                # Clean up our tracker
+                # Clean up tracker
                 temp_channels.pop(temp_vc.id, None)
             except discord.NotFound:
                 pass  # Channel was already deleted
 
+
+# Sync slash commands with Discord client command
 @bot.command()
 async def sync(ctx):
-    """Sync slash commands with Discord"""
+    # Sync slash commands with Discord client
     try:
         synced = await bot.tree.sync()
         await ctx.send(f"Synced {len(synced)} command(s)")
     except Exception as e:
         await ctx.send(f"Failed to sync commands: {e}")
 
+
+# Initialisation
 bot.run(token)
