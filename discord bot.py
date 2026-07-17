@@ -2,31 +2,52 @@ import discord
 import os
 from dotenv import load_dotenv
 from discord.ext import commands
+import json
+from pathlib import Path
 
 load_dotenv()
 
 token = os.getenv('discord_token')
 main_channel_id = int(os.getenv('shop_channel_id'))
-admin_user_id = int(os.getenv('admin_user_id'))
 admin_channel_id = int(os.getenv('admin_channel_id'))
 category_id = int(os.getenv('category_id'))
 sort_code = os.getenv('sort_code')
 account_number = os.getenv('account_number')
 name_on_account = os.getenv('name_on_account')
 
+LOBBY_DATA_FILE = "lobby_channels.json"
+
+def save_lobby_channels():
+    """Save lobby channels to JSON file"""
+    with open(LOBBY_DATA_FILE, 'w') as f:
+        json.dump(lobby_channels, f, indent=2)
+
+def load_lobby_channels():
+    """Load lobby channels from JSON file"""
+    global lobby_channels
+    if Path(LOBBY_DATA_FILE).exists():
+        with open(LOBBY_DATA_FILE, 'r') as f:
+            lobby_channels = json.load(f)
+            # Convert string keys back to integers (JSON keys are always strings)
+            lobby_channels = {int(k): v for k, v in lobby_channels.items()}
+
 bot = commands.Bot(command_prefix="pdg!", intents=discord.Intents.all())
 
+lobby_channels = {}  # Maps lobby channel IDs to role IDs
+temp_channels = {}   # Maps temporary channel IDs to their corresponding lobby channel IDs
+
 class PaymentConfirmationView(discord.ui.View):
-    def __init__(self, item_name: str):
+    def __init__(self, item_name: str, admin_user_id: int):
         super().__init__(timeout=None)
         self.item_name = item_name
+        self.admin_user_id = admin_user_id
 
     @discord.ui.button(label="Payment Completed", style=discord.ButtonStyle.green, emoji="✅")
     async def confirm_payment_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
         admin_channel = interaction.client.get_channel(admin_channel_id)
         if admin_channel:
             await admin_channel.send(
-                f"🔔<@{admin_user_id}>, member {interaction.user.mention} has just paid for **{self.item_name}**.\n"
+                f"🔔<@{self.admin_user_id}>, member {interaction.user.mention} has just paid for **{self.item_name}**.\n"
                 f"Check their proof of payment here: {interaction.channel.mention}"
             )
             await interaction.response.send_message("Thank you for your purchase! Admin has been notified.", ephemeral=True)
@@ -36,9 +57,10 @@ class PaymentConfirmationView(discord.ui.View):
             await interaction.response.send_message("Error: Admin channel could not be found.", ephemeral=True)
 
 class EmbedItemPage(discord.ui.View):
-    def __init__(self, item_name: str):
+    def __init__(self, item_name: str, admin_user_id: int):
         super().__init__() # Timeout is 180 seconds by default
         self.item_name = item_name
+        self.admin_user_id = admin_user_id
 
     @discord.ui.button(label="Buy", style=discord.ButtonStyle.blurple, emoji="🛍️")
     async def my_button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -66,22 +88,121 @@ class EmbedItemPage(discord.ui.View):
             ),
             color=discord.Color.gold()
         )
-        payment_view = PaymentConfirmationView(self.item_name)
+        payment_view = PaymentConfirmationView(self.item_name, self.admin_user_id)
         await new_channel.send(content=user.mention, embed=welcome_embed, view=payment_view)
 
-#@bot.event
-#async def on_ready():  
-#    print('Im ready epta')
-#    channel = bot.get_channel(main_channel_id)
-#    await channel.send("Im ready epta")
+@bot.event
+async def on_ready():  
+    global lobby_channels
+    print('Bot is ready')
+    
+    # Load saved lobby channels
+    load_lobby_channels()
+    
+    # Verify all saved channels still exist in Discord
+    for guild in bot.guilds:
+        channels_to_remove = []
+        for channel_id in list(lobby_channels.keys()):
+            channel = guild.get_channel(channel_id)
+            if channel is None:
+                # Channel was deleted, remove from tracking
+                channels_to_remove.append(channel_id)
+                print(f"Lobby channel {channel_id} not found, removing from memory")
+        
+        # Remove deleted channels
+        for channel_id in channels_to_remove:
+            lobby_channels.pop(channel_id, None)
+    
+    # Save the cleaned-up list
+    save_lobby_channels()
+    
+    channel = bot.get_channel(main_channel_id)
+    if channel:
+        await channel.send(f"Bot online! Loaded {len(lobby_channels)} lobby channels")
 
 @bot.command()
-async def create_item(ctx, price: float, name: str, image_url: str, *description: str):
+async def create_item(ctx, admin_user_id: int, channel: discord.TextChannel, name: str, price: float, image_url: str, *description: str):
     embed = discord.Embed(title=name, color=discord.Color.blue())
     embed.add_field(name="Price", value=f"£{price}", inline=False)
     embed.add_field(name="Description", value=' '.join(description), inline=False)
     embed.set_image(url=image_url)
-    view = EmbedItemPage(item_name=name)
-    await ctx.send(embed=embed, view=view)
+    view = EmbedItemPage(item_name=name, admin_user_id=admin_user_id)
+    await channel.send(embed=embed, view=view)
+    await ctx.send(f"Item posted to {channel.mention}", ephemeral=True)
+
+@bot.command()
+@commands.has_permissions(manage_channels=True)
+async def setup_vc(ctx, role: discord.Role, category: discord.CategoryChannel):
+    """
+    Creates a lobby channel that is only visible/joinable by a specific role.
+    Example: pdg!setup_vc @Gold-Members "Private Chats"
+    """
+    overwrites = {
+        ctx.guild.default_role: discord.PermissionOverwrite(view_channel=False, connect=False),
+        role: discord.PermissionOverwrite(view_channel=True, connect=True),
+        ctx.guild.me: discord.PermissionOverwrite(view_channel=True, connect=True, move_members=True, manage_channels=True)
+    }
+
+    vc_name = f"Create {role.name.lower()} vc"
+    
+    lobby_channel = await ctx.guild.create_voice_channel(
+        name=vc_name,
+        category=category,
+        overwrites=overwrites
+    )
+    
+    # Store in memory AND save to file
+    lobby_channels[lobby_channel.id] = role.id
+    save_lobby_channels()  # Add this line
+    
+    await ctx.send(f"Created parent voice chat {lobby_channel.mention} in category **{category.name}** for role **{role.name}**.")
+
+@bot.event
+async def on_voice_state_update(member, before, after):
+    # Case 1: User joins the Lobby voice channel
+    if after.channel and after.channel.id in lobby_channels:
+        lobby_vc = after.channel
+        allowed_role_id = lobby_channels[lobby_vc.id]
+        role = member.guild.get_role(allowed_role_id)
+        
+        if not role:
+            return
+
+        # Double check if the user actually has the role (optional, since permission should prevent them joining)
+        if role in member.roles:
+            # Overwrites for the temporary channel so only that role can access it
+            overwrites = {
+                member.guild.default_role: discord.PermissionOverwrite(view_channel=False, connect=False),
+                role: discord.PermissionOverwrite(view_channel=True, connect=True),
+                member.guild.me: discord.PermissionOverwrite(view_channel=True, connect=True, move_members=True, manage_channels=True)
+            }
+            
+            temp_name = f"{member.name}'s {role.name.lower()} vc"
+            
+            # Create the temporary channel in the same category as the lobby
+            temp_vc = await member.guild.create_voice_channel(
+                name=temp_name,
+                category=lobby_vc.category,
+                overwrites=overwrites
+            )
+            
+            # Record it in our tracker
+            temp_channels[temp_vc.id] = lobby_vc.id
+            
+            # Move the user instantly
+            await member.move_to(temp_vc)
+
+    # Case 2: User leaves or switches out of a temporary voice channel
+    if before.channel and before.channel.id in temp_channels:
+        temp_vc = before.channel
+        
+        # Check if the channel is now completely empty
+        if len(temp_vc.members) == 0:
+            try:
+                await temp_vc.delete()
+                # Clean up our tracker
+                temp_channels.pop(temp_vc.id, None)
+            except discord.NotFound:
+                pass  # Channel was already deleted
 
 bot.run(token)
