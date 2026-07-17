@@ -2,6 +2,7 @@ import discord
 import os
 from dotenv import load_dotenv
 from discord.ext import commands
+from discord import app_commands
 import json
 from pathlib import Path
 
@@ -120,42 +121,58 @@ async def on_ready():
     if channel:
         await channel.send(f"Bot online! Loaded {len(lobby_channels)} lobby channels")
 
-@bot.command()
-async def create_item(ctx, admin_user_id: int, channel: discord.TextChannel, name: str, price: float, image_url: str, *description: str):
-    embed = discord.Embed(title=name, color=discord.Color.blue())
+@app_commands.command(name="create_item", description="Create a shop item")
+async def create_item(
+    interaction: discord.Interaction,
+    admin_user: discord.User,
+    shop_channel: discord.TextChannel,
+    item_name: str,
+    price: float,
+    image_url: str,
+    description: str
+):
+    embed = discord.Embed(title=item_name, color=discord.Color.blue())
     embed.add_field(name="Price", value=f"£{price}", inline=False)
-    embed.add_field(name="Description", value=' '.join(description), inline=False)
+    embed.add_field(name="Description", value=description, inline=False)
     embed.set_image(url=image_url)
-    view = EmbedItemPage(item_name=name, admin_user_id=admin_user_id)
-    await channel.send(embed=embed, view=view)
-    await ctx.send(f"Item posted to {channel.mention}", ephemeral=True)
+    view = EmbedItemPage(item_name=item_name, admin_user_id=admin_user.id)
 
-@bot.command()
-@commands.has_permissions(manage_channels=True)
-async def setup_vc(ctx, role: discord.Role, category: discord.CategoryChannel):
-    """
-    Creates a lobby channel that is only visible/joinable by a specific role.
-    Example: pdg!setup_vc @Gold-Members "Private Chats"
-    """
+    try:
+        await shop_channel.send(embed=embed, view=view)
+        await interaction.response.send_message(f"Item posted to {shop_channel.mention}", ephemeral=True)
+    except discord.Forbidden:
+        await interaction.response.send_message(f"Bot doesn't have permission to send messages in {shop_channel.mention}.", ephemeral=True)
+
+bot.tree.add_command(create_item)
+
+@app_commands.command(name="setup_vc", description="Create a lobby voice channel for a role")
+@app_commands.checks.has_permissions(manage_channels=True)
+async def setup_vc(
+    interaction: discord.Interaction,
+    role: discord.Role,
+    category: discord.CategoryChannel
+):
+    """Creates a lobby channel that is only visible/joinable by a specific role."""
     overwrites = {
-        ctx.guild.default_role: discord.PermissionOverwrite(view_channel=False, connect=False),
+        interaction.guild.default_role: discord.PermissionOverwrite(view_channel=False, connect=False),
         role: discord.PermissionOverwrite(view_channel=True, connect=True),
-        ctx.guild.me: discord.PermissionOverwrite(view_channel=True, connect=True, move_members=True, manage_channels=True)
+        interaction.guild.me: discord.PermissionOverwrite(view_channel=True, connect=True, move_members=True, manage_channels=True)
     }
 
     vc_name = f"Create {role.name.lower()} vc"
     
-    lobby_channel = await ctx.guild.create_voice_channel(
+    lobby_channel = await interaction.guild.create_voice_channel(
         name=vc_name,
         category=category,
         overwrites=overwrites
     )
     
-    # Store in memory AND save to file
     lobby_channels[lobby_channel.id] = role.id
-    save_lobby_channels()  # Add this line
+    save_lobby_channels()
     
-    await ctx.send(f"Created parent voice chat {lobby_channel.mention} in category **{category.name}** for role **{role.name}**.")
+    await interaction.response.send_message(f"Created parent voice chat {lobby_channel.mention} in category **{category.name}** for role **{role.name}**.", ephemeral=True)
+
+bot.tree.add_command(setup_vc)
 
 @bot.event
 async def on_voice_state_update(member, before, after):
@@ -204,5 +221,14 @@ async def on_voice_state_update(member, before, after):
                 temp_channels.pop(temp_vc.id, None)
             except discord.NotFound:
                 pass  # Channel was already deleted
+
+@bot.command()
+async def sync(ctx):
+    """Sync slash commands with Discord"""
+    try:
+        synced = await bot.tree.sync()
+        await ctx.send(f"Synced {len(synced)} command(s)")
+    except Exception as e:
+        await ctx.send(f"Failed to sync commands: {e}")
 
 bot.run(token)
