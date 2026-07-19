@@ -6,8 +6,8 @@ from discord import app_commands
 import json
 from pathlib import Path
 
+# Get information from .env file
 load_dotenv()
-
 token = os.getenv('discord_token')
 main_channel_id = int(os.getenv('shop_channel_id'))
 admin_channel_id = int(os.getenv('admin_channel_id'))
@@ -15,6 +15,7 @@ category_id = int(os.getenv('category_id'))
 sort_code = os.getenv('sort_code')
 account_number = os.getenv('account_number')
 name_on_account = os.getenv('name_on_account')
+# Get information from lobby_channels.json file if it exists
 LOBBY_DATA_FILE = "lobby_channels.json"
 def save_lobby_channels():
     # Save lobby channels to JSON file in case of a failure or restart
@@ -29,7 +30,7 @@ def load_lobby_channels():
             # Convert string keys back to integers (JSON keys are always strings)
             lobby_channels = {int(k): v for k, v in lobby_channels.items()}
 
-# basically used only for sync command and then discord ui can be used for everything else
+# Basically used only for sync command and then Discord UI can be used for everything else
 bot = commands.Bot(command_prefix="pdg!", intents=discord.Intents.all())
 
 lobby_channels = {}  # Maps lobby channel IDs to role IDs
@@ -43,7 +44,7 @@ class PaymentConfirmationView(discord.ui.View):
         self.item_name = item_name
         self.admin_user_id = admin_user_id
 
-    @discord.ui.button(label="Payment Completed", style=discord.ButtonStyle.green, emoji="✅")
+    @discord.ui.button(label="Payment Completed", style=discord.ButtonStyle.green, emoji="✅", custom_id="payment_completed")
     async def confirm_payment_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
         admin_channel = interaction.client.get_channel(admin_channel_id)
         if admin_channel:
@@ -57,14 +58,27 @@ class PaymentConfirmationView(discord.ui.View):
         else:
             await interaction.response.send_message("Error: Admin channel could not be found.", ephemeral=True)
 
-# Payment button
-class EmbedItemPage(discord.ui.View):
-    def __init__(self, item_name: str, admin_user_id: int):
-        super().__init__() # Timeout is 180 seconds by default
+# Delivery address input form
+class DeliveryAddressView(discord.ui.View):
+    def __init__(self, channel: discord.TextChannel, item_name: str, admin_user_id: int):
+        super().__init__(timeout=None)
+        self.channel = channel
         self.item_name = item_name
         self.admin_user_id = admin_user_id
 
-    @discord.ui.button(label="Buy", style=discord.ButtonStyle.blurple, emoji="🛍️")
+    @discord.ui.button(label="Add Delivery Address", style=discord.ButtonStyle.blurple, emoji="📍", custom_id="add_delivery_address")
+    async def delivery_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
+        modal = DeliveryAddressModal(self.channel, self.item_name, self.admin_user_id)
+        await interaction.response.send_modal(modal)
+
+# Payment button
+class EmbedItemPage(discord.ui.View):
+    def __init__(self, item_name: str, admin_user_id: int):
+        super().__init__(timeout=None)
+        self.item_name = item_name
+        self.admin_user_id = admin_user_id
+
+    @discord.ui.button(label="Buy", style=discord.ButtonStyle.blurple, emoji="🛍️", custom_id="buy_button")
     async def my_button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
         guild = interaction.guild
         user = interaction.user
@@ -77,21 +91,17 @@ class EmbedItemPage(discord.ui.View):
         safe_item_name = self.item_name.lower().replace(" ", "-")
         channel_name = f"{user.name}'s-order-{safe_item_name}"
         new_channel = await guild.create_text_channel(name=channel_name, overwrites=overwrites, category=category)
-        # 3. What happens when the button is clicked
-        await interaction.response.send_message(f"Open {new_channel.mention}", ephemeral=True)
-        welcome_embed = discord.Embed(
-            title=f"Welcome to your order, {user.display_name}!",
-            description=(
-                f"To purchase **{self.item_name}**, please proceed with the payment. "
-                "Once done, please provide proof of payment here and press the button below.\n\n"
-                f"**Sort code:** {sort_code}\n"
-                f"**Account number:** {account_number}\n"
-                f"**Name**: {name_on_account}"
-            ),
-            color=discord.Color.gold()
+        
+        await interaction.response.send_message(f"Order channel created: {new_channel.mention}", ephemeral=True)
+        
+        # Show delivery address form embed with button
+        delivery_embed = discord.Embed(
+            title=f"🛍️ Order for {self.item_name}",
+            description="Please provide your delivery address to continue.",
+            color=discord.Color.blue()
         )
-        payment_view = PaymentConfirmationView(self.item_name, self.admin_user_id)
-        await new_channel.send(content=user.mention, embed=welcome_embed, view=payment_view)
+        delivery_view = DeliveryAddressView(new_channel, self.item_name, self.admin_user_id)
+        await new_channel.send(content=user.mention, embed=delivery_embed, view=delivery_view)
 
 
 # Startup + debug notifications
@@ -99,6 +109,13 @@ class EmbedItemPage(discord.ui.View):
 async def on_ready():  
     global lobby_channels
     print('Bot online')
+
+    bot.add_view(EmbedItemPage("temp", 0))
+    bot.add_view(PaymentConfirmationView("temp", 0))
+    bot.add_view(VerificationButton())
+    bot.add_view(VerificationForm(None))
+    bot.add_view(DeliveryAddressView(None, "temp", 0))
+
     # Load saved lobby channels
     load_lobby_channels()
     # Verify all saved channels still exist in Discord
@@ -182,7 +199,7 @@ class VerificationButton(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="Verify Membership", style=discord.ButtonStyle.green, emoji="✅")
+    @discord.ui.button(label="Verify Membership", style=discord.ButtonStyle.green, emoji="✅", custom_id="verify_membership")
     async def verify_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
         user = interaction.user
         guild = interaction.guild
@@ -211,13 +228,13 @@ class VerificationButton(discord.ui.View):
         verif_form = VerificationForm(verif_channel)
         await verif_channel.send(content=user.mention, embed=verif_embed, view=verif_form)
 
-# Verification confirmation button
+# Verification submition form
 class VerificationForm(discord.ui.View):
     def __init__(self, channel: discord.TextChannel):
         super().__init__(timeout=None)
         self.channel = channel
 
-    @discord.ui.button(label="Submit Name & Surname", style=discord.ButtonStyle.blurple, emoji="📝")
+    @discord.ui.button(label="Submit Name & Surname", style=discord.ButtonStyle.blurple, emoji="📝", custom_id="submit_verification")
     async def submit_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(NameSurnameModal(self.channel))
 
@@ -247,6 +264,78 @@ class NameSurnameModal(discord.ui.Modal, title="Membership Verification"):
             ephemeral=True
         )
 
+# Delivery address form create button
+class DeliveryAddressModal(discord.ui.Modal, title="Delivery Address"):
+    first_name = discord.ui.TextInput(
+        label="First Name",
+        placeholder="John",
+        required=True
+    )
+    last_name = discord.ui.TextInput(
+        label="Last Name",
+        placeholder="Doe",
+        required=True
+    )
+    street_address = discord.ui.TextInput(
+        label="Address",
+        placeholder="27-28 Gordon Sq",
+        required=True,
+        style=discord.TextStyle.paragraph
+    )
+    apartment = discord.ui.TextInput(
+        label="Apartment, Suite, Etc.",
+        placeholder="Apartment, Suite, Floor, etc. (Leave blank if not applicable)",
+        required=False
+    )
+    zip_code = discord.ui.TextInput(
+        label="ZIP Code",
+        placeholder="WC1H 0AW",
+        required=True
+    )
+
+    def __init__(self, channel: discord.TextChannel, item_name: str, admin_user_id: int):
+        super().__init__()
+        self.channel = channel
+        self.item_name = item_name
+        self.admin_user_id = admin_user_id
+
+    async def on_submit(self, interaction: discord.Interaction):
+        user = interaction.user
+        
+        # Format address
+        apartment_line = f"\n{self.apartment.value}" if self.apartment.value else ""
+        full_address = f"{self.first_name.value} {self.last_name.value}\n{self.street_address.value}{apartment_line}\n{self.zip_code.value}"
+        
+        # Save address in channel
+        address_embed = discord.Embed(
+            title="📦 Delivery Address",
+            color=discord.Color.green()
+        )
+        address_embed.add_field(name="Name", value=f"{self.first_name.value} {self.last_name.value}", inline=False)
+        address_embed.add_field(name="Address", value=self.street_address.value, inline=False)
+        if self.apartment.value:
+            address_embed.add_field(name="Apartment/Suite", value=self.apartment.value, inline=False)
+        address_embed.add_field(name="ZIP Code", value=self.zip_code.value, inline=False)
+        
+        address_message = await self.channel.send(embed=address_embed)
+        await address_message.pin()
+        
+        # Send payment button embed
+        payment_embed = discord.Embed(
+            title=f"💸 Payment for {self.item_name}",
+            description=(
+                "Your delivery address has been saved. Now proceed with payment.\n\n"
+                f"**Sort code:** {sort_code}\n"
+                f"**Account number:** {account_number}\n"
+                f"**Name**: {name_on_account}\n\n"
+                "Once paid, upload proof of payment and press the button below."
+            ),
+            color=discord.Color.gold()
+        )
+        payment_view = PaymentConfirmationView(self.item_name, self.admin_user_id)
+        await self.channel.send(embed=payment_embed, view=payment_view)
+        
+        await interaction.response.send_message("✅ Address saved! Payment details sent to channel.", ephemeral=True)
 
 # Create verification embed command in a given channel command
 @app_commands.command(name="create_verif", description="Create a verification button in a channel")
