@@ -144,6 +144,7 @@ async def on_ready():
 
 # Create an item command in the shop channel
 @app_commands.command(name="create_item", description="Create an item in shop channel")
+@app_commands.checks.has_permissions(administrator=True)
 async def create_item(
     interaction: discord.Interaction,
     admin_user: discord.User,
@@ -169,7 +170,7 @@ bot.tree.add_command(create_item)
 
 # Create a parent voice channel for a certain role command
 @app_commands.command(name="setup_vc", description="Create a parent voice channel for a role")
-@app_commands.checks.has_permissions(manage_channels=True)
+@app_commands.checks.has_permissions(administrator=True)
 async def setup_vc(
     interaction: discord.Interaction,
     role: discord.Role,
@@ -341,6 +342,7 @@ class DeliveryAddressModal(discord.ui.Modal, title="Delivery Address"):
 
 # Create verification embed command in a given channel command
 @app_commands.command(name="create_verif", description="Create a verification button in a channel")
+@app_commands.checks.has_permissions(administrator=True)
 async def create_verif(interaction: discord.Interaction, channel: discord.TextChannel):
     embed = discord.Embed(
         title="Membership Verification",
@@ -407,6 +409,7 @@ async def on_voice_state_update(member, before, after):
 
 # Sync slash commands with Discord client command
 @bot.command()
+@commands.has_permissions(administrator=True)
 async def sync(ctx):
     # Sync slash commands with Discord client
     try:
