@@ -15,6 +15,8 @@ category_id = int(os.getenv('category_id'))
 sort_code = os.getenv('sort_code')
 account_number = os.getenv('account_number')
 name_on_account = os.getenv('name_on_account')
+prefix = os.getenv('command_prefix', 'pdg!')  # Default prefix if not set in .env
+
 # Get information from lobby_channels.json file if it exists
 LOBBY_DATA_FILE = "lobby_channels.json"
 def save_lobby_channels():
@@ -31,7 +33,7 @@ def load_lobby_channels():
             lobby_channels = {int(k): v for k, v in lobby_channels.items()}
 
 # Basically used only for sync command and then Discord UI can be used for everything else
-bot = commands.Bot(command_prefix="pdg!", intents=discord.Intents.all())
+bot = commands.Bot(command_prefix=prefix, intents=discord.Intents.all())
 
 lobby_channels = {}  # Maps lobby channel IDs to role IDs
 temp_channels = {}   # Maps temporary channel IDs to their corresponding lobby channel IDs
