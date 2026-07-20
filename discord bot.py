@@ -159,9 +159,9 @@ async def create_item(
 
     try:
         await shop_channel.send(embed=embed, view=view)
-        await interaction.response.send_message(f"Item posted to {shop_channel.mention}", ephemeral=True)
+        await interaction.response.send_message(f"Item posted to **{shop_channel.mention}**")
     except discord.Forbidden:
-        await interaction.response.send_message(f"Bot doesn't have permission to send messages in {shop_channel.mention}.", ephemeral=True)
+        await interaction.response.send_message(f"Bot doesn't have permission to send messages in **{shop_channel.mention}**.", ephemeral=True)
 bot.tree.add_command(create_item)
 
 
@@ -190,7 +190,7 @@ async def setup_vc(
     
     lobby_channels[lobby_channel.id] = role.id
     save_lobby_channels()
-    await interaction.response.send_message(f"Created parent voice chat {lobby_channel.mention} in category **{category.name}** for role **{role.name}**.", ephemeral=True)
+    await interaction.response.send_message(f"Created parent voice chat **{lobby_channel.mention}** in category **{category.name}** for role **{role.name}**.")
 bot.tree.add_command(setup_vc)
 
 
@@ -268,12 +268,12 @@ class NameSurnameModal(discord.ui.Modal, title="Membership Verification"):
 class DeliveryAddressModal(discord.ui.Modal, title="Delivery Address"):
     first_name = discord.ui.TextInput(
         label="First Name",
-        placeholder="John",
+        placeholder="Oliver",
         required=True
     )
     last_name = discord.ui.TextInput(
         label="Last Name",
-        placeholder="Doe",
+        placeholder="Sykes",
         required=True
     )
     street_address = discord.ui.TextInput(
@@ -335,7 +335,7 @@ class DeliveryAddressModal(discord.ui.Modal, title="Delivery Address"):
         payment_view = PaymentConfirmationView(self.item_name, self.admin_user_id)
         await self.channel.send(embed=payment_embed, view=payment_view)
         
-        await interaction.response.send_message("✅ Address saved! Payment details sent to channel.", ephemeral=True)
+        await interaction.response.send_message("Address saved. Payment details sent to channel.", ephemeral=True)
 
 # Create verification embed command in a given channel command
 @app_commands.command(name="create_verif", description="Create a verification button in a channel")
@@ -349,9 +349,9 @@ async def create_verif(interaction: discord.Interaction, channel: discord.TextCh
     
     try:
         await channel.send(embed=embed, view=view)
-        await interaction.response.send_message(f"Verification button posted to {channel.mention}", ephemeral=True)
+        await interaction.response.send_message(f"Verification button posted to **{channel.mention}**")
     except discord.Forbidden:
-        await interaction.response.send_message(f"Bot doesn't have permission to send messages in {channel.mention}.", ephemeral=True)
+        await interaction.response.send_message(f"Bot doesn't have permission to send messages in **{channel.mention}**.", ephemeral=True)
 bot.tree.add_command(create_verif)
 
 
