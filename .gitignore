@@ -1,4 +1,5 @@
 lobby_channels.json
+guild_settings.json
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
