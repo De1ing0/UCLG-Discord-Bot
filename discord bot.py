@@ -9,12 +9,6 @@ from pathlib import Path
 # Get information from .env file
 load_dotenv()
 token = os.getenv('discord_token')
-main_channel_id = int(os.getenv('shop_channel_id'))
-admin_channel_id = int(os.getenv('admin_channel_id'))
-category_id = int(os.getenv('category_id'))
-sort_code = os.getenv('sort_code')
-account_number = os.getenv('account_number')
-name_on_account = os.getenv('name_on_account')
 prefix = os.getenv('command_prefix', 'pdg!')  # Default prefix if not set in .env
 
 # Get information from lobby_channels.json file if it exists
@@ -32,11 +26,35 @@ def load_lobby_channels():
             # Convert string keys back to integers (JSON keys are always strings)
             lobby_channels = {int(k): v for k, v in lobby_channels.items()}
 
+
+GUILD_SETTINGS_FILE = "guild_settings.json"
+
+def save_guild_settings():
+    # Save guild settings to JSON file
+    with open(GUILD_SETTINGS_FILE, 'w') as f:
+        json.dump(guild_settings, f, indent=2)
+
+def load_guild_settings():
+    # Load guild settings from JSON file
+    global guild_settings
+    if Path(GUILD_SETTINGS_FILE).exists():
+        with open(GUILD_SETTINGS_FILE, 'r') as f:
+            data = json.load(f)
+            guild_settings = {int(k): v for k, v in data.items()}
+
+def get_guild_setting(guild_id, setting_key, default=None):
+    # Get a specific setting for a guild
+    if guild_id in guild_settings:
+        return guild_settings[guild_id].get(setting_key, default)
+    return default
+
+
 # Basically used only for sync command and then Discord UI can be used for everything else
 bot = commands.Bot(command_prefix=prefix, intents=discord.Intents.all())
 
 lobby_channels = {}  # Maps lobby channel IDs to role IDs
 temp_channels = {}   # Maps temporary channel IDs to their corresponding lobby channel IDs
+guild_settings = {}  # Maps guild IDs to their settings
 
 
 # Payment confirmation button
@@ -48,6 +66,8 @@ class PaymentConfirmationView(discord.ui.View):
 
     @discord.ui.button(label="Payment Completed", style=discord.ButtonStyle.green, emoji="✅", custom_id="payment_completed")
     async def confirm_payment_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
+        guild_id = interaction.guild.id
+        admin_channel_id = get_guild_setting(guild_id, "admin_channel_id")
         admin_channel = interaction.client.get_channel(admin_channel_id)
         if admin_channel:
             await admin_channel.send(
@@ -84,6 +104,9 @@ class EmbedItemPage(discord.ui.View):
     async def my_button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
         guild = interaction.guild
         user = interaction.user
+        guild_id = guild.id
+        category_id = get_guild_setting(guild_id, "category_id")
+        
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(read_messages=False),
             user: discord.PermissionOverwrite(read_messages=True, send_messages=True),
@@ -120,6 +143,8 @@ async def on_ready():
 
     # Load saved lobby channels
     load_lobby_channels()
+    load_guild_settings()
+
     # Verify all saved channels still exist in Discord
     for guild in bot.guilds:
         channels_to_remove = []
@@ -135,11 +160,7 @@ async def on_ready():
     # Save the cleaned-up list
     save_lobby_channels()
     
-    channel = bot.get_channel(main_channel_id)
-    if channel:
-        await channel.send(f"Bot online. Loaded {len(lobby_channels)} parent voice channels.")
-        for vc in lobby_channels.keys():
-            await channel.send(f"Parent voice channel ID: {vc} is being tracked.")
+    print(f"Bot ready. Loaded {len(lobby_channels)} parent voice channels.")
 
 
 # Create an item command in the shop channel
@@ -206,6 +227,16 @@ class VerificationButton(discord.ui.View):
     async def verify_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
         user = interaction.user
         guild = interaction.guild
+        guild_id = guild.id
+        
+        # Get category from guild settings
+        category_id = get_guild_setting(guild_id, "category_id")
+        if not category_id:
+            await interaction.response.send_message(
+                "Server not configured. Admin needs to run `/configure_bot` first.",
+                ephemeral=False
+            )
+            return
         
         # Create private verification channel
         overwrites = {
@@ -242,8 +273,8 @@ class VerificationForm(discord.ui.View):
         await interaction.response.send_modal(NameSurnameModal(self.channel))
 
 class NameSurnameModal(discord.ui.Modal, title="Membership Verification"):
-    name = discord.ui.TextInput(label="First Name", placeholder="Enter your first name", required=True)
-    surname = discord.ui.TextInput(label="Last Name", placeholder="Enter your last name", required=True)
+    name = discord.ui.TextInput(label="First Name", placeholder="Oliver", required=True)
+    surname = discord.ui.TextInput(label="Last Name", placeholder="Sykes", required=True)
 
     def __init__(self, channel: discord.TextChannel):
         super().__init__()
@@ -251,6 +282,17 @@ class NameSurnameModal(discord.ui.Modal, title="Membership Verification"):
 
     async def on_submit(self, interaction: discord.Interaction):
         user = interaction.user
+        guild_id = self.channel.guild.id
+        
+        # Get admin channel from guild settings
+        admin_channel_id = get_guild_setting(guild_id, "admin_channel_id")
+        if not admin_channel_id:
+            await interaction.response.send_message(
+                "Server not configured. Admin needs to run `/configure_bot` first.",
+                ephemeral=False
+            )
+            return
+        
         admin_channel = interaction.client.get_channel(admin_channel_id)
         
         if admin_channel:
@@ -303,11 +345,11 @@ class DeliveryAddressModal(discord.ui.Modal, title="Delivery Address"):
         self.admin_user_id = admin_user_id
 
     async def on_submit(self, interaction: discord.Interaction):
-        user = interaction.user
+        guild_id = self.channel.guild.id
         
-        # Format address
-        apartment_line = f"\n{self.apartment.value}" if self.apartment.value else ""
-        full_address = f"{self.first_name.value} {self.last_name.value}\n{self.street_address.value}{apartment_line}\n{self.zip_code.value}"
+        sort_code = get_guild_setting(guild_id, "sort_code")
+        account_number = get_guild_setting(guild_id, "account_number")
+        name_on_account = get_guild_setting(guild_id, "name_on_account")
         
         # Save address in channel
         address_embed = discord.Embed(
@@ -406,6 +448,70 @@ async def on_voice_state_update(member, before, after):
             except discord.NotFound:
                 pass  # Channel was already deleted
 
+
+@app_commands.command(name="configure_bot", description="Configure bot settings for this server")
+@app_commands.checks.has_permissions(administrator=True)
+async def configure_bot(
+    interaction: discord.Interaction,
+    shop_channel: discord.TextChannel,
+    admin_channel: discord.TextChannel,
+    category: discord.CategoryChannel,
+):
+    # Admin command to configure bot per server
+    guild_id = interaction.guild.id
+    
+    # Create or update settings
+    if guild_id not in guild_settings:
+        guild_settings[guild_id] = {}
+    
+    guild_settings[guild_id] = {
+        "shop_channel_id": shop_channel.id,
+        "admin_channel_id": admin_channel.id,
+        "category_id": category.id,
+    }
+    
+    save_guild_settings()
+    
+    await interaction.response.send_message(
+        f"Bot configured for this server\n"
+        f"Shop Channel: {shop_channel.mention}\n"
+        f"Admin Channel: {admin_channel.mention}\n"
+        f"Category: {category.mention}",
+        ephemeral=False
+    )
+bot.tree.add_command(configure_bot)
+
+@app_commands.command(name="configure_payment", description="Set payment details for this server")
+@app_commands.checks.has_permissions(administrator=True)
+async def configure_payment(
+    interaction: discord.Interaction,
+    sort_code: str,
+    account_number: str,
+    name_on_account: str
+):
+    # Admin command to configure payment details per server
+    guild_id = interaction.guild.id
+    
+    # Update existing settings or create new ones
+    if guild_id not in guild_settings:
+        guild_settings[guild_id] = {}
+    
+    guild_settings[guild_id].update({
+        "sort_code": sort_code,
+        "account_number": account_number,
+        "name_on_account": name_on_account
+    })
+    
+    save_guild_settings()
+    
+    await interaction.response.send_message(
+        f"Payment details configured\n"
+        f"Sort Code: {sort_code}\n"
+        f"Account Number: {account_number}\n"
+        f"Name on Account: {name_on_account}",
+        ephemeral=False
+    )
+bot.tree.add_command(configure_payment)
 
 # Sync slash commands with Discord client command
 @bot.command()
