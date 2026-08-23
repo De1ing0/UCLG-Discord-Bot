@@ -114,7 +114,7 @@ class EmbedItemPage(discord.ui.View):
         }
         category = guild.get_channel(category_id)
         safe_item_name = self.item_name.lower().replace(" ", "-")
-        channel_name = f"{user.name}'s-order-{safe_item_name}"
+        channel_name = f"≫・{user.name}'s-order-{safe_item_name}"
         new_channel = await guild.create_text_channel(name=channel_name, overwrites=overwrites, category=category)
         
         await interaction.response.send_message(f"Order channel created: {new_channel.mention}", ephemeral=True)
@@ -204,7 +204,7 @@ async def setup_vc(
         interaction.guild.me: discord.PermissionOverwrite(view_channel=True, connect=True, move_members=True, manage_channels=True)
     }
 
-    vc_name = f"Create {role.name.lower()} vc"
+    vc_name = f"≫・create {role.name.lower()} vc"
     
     lobby_channel = await interaction.guild.create_voice_channel(
         name=vc_name,
@@ -404,7 +404,7 @@ bot.tree.add_command(create_verif)
 # Check for already created parent voice channels in case of a restart/failure
 @bot.event
 async def on_voice_state_update(member, before, after):
-    # Case 1: User joins the Parent voice channel
+        # Case 1: User joins the Parent voice channel
     if after.channel and after.channel.id in lobby_channels:
         lobby_vc = after.channel
         allowed_role_id = lobby_channels[lobby_vc.id]
@@ -413,28 +413,28 @@ async def on_voice_state_update(member, before, after):
         if not role:
             return
 
-        # Double check if the user actually has the role
-        if role in member.roles:
-            # Overwrites for the temporary channel so only that role can access it
-            overwrites = {
-                member.guild.default_role: discord.PermissionOverwrite(view_channel=False, connect=False),
-                role: discord.PermissionOverwrite(view_channel=True, connect=True),
-                member.guild.me: discord.PermissionOverwrite(view_channel=True, connect=True, move_members=True, manage_channels=True)
-            }
-            
-            temp_name = f"{member.name}'s {role.name.lower()} vc"
-            
-            # Create the temporary channel in the same category as the parent channel
-            temp_vc = await member.guild.create_voice_channel(
-                name=temp_name,
-                category=lobby_vc.category,
-                overwrites=overwrites
-            )
+        # Overwrites for the temporary channel: the role and the creator can access it
+        # regardless of whether the creator actually holds the role
+        overwrites = {
+            member.guild.default_role: discord.PermissionOverwrite(view_channel=False, connect=False),
+            role: discord.PermissionOverwrite(view_channel=True, connect=True),
+            member: discord.PermissionOverwrite(view_channel=True, connect=True),
+            member.guild.me: discord.PermissionOverwrite(view_channel=True, connect=True, move_members=True, manage_channels=True)
+        }
 
-            # Record it in tracker
-            temp_channels[temp_vc.id] = lobby_vc.id
-            # Move the user to the created temporary voice channel
-            await member.move_to(temp_vc)
+        temp_name = f"≫・{member.name}'s {role.name.lower()} vc"
+
+        # Create the temporary channel in the same category as the parent channel
+        temp_vc = await member.guild.create_voice_channel(
+            name=temp_name,
+            category=lobby_vc.category,
+            overwrites=overwrites
+        )
+
+        # Record it in tracker
+        temp_channels[temp_vc.id] = lobby_vc.id
+        # Move the user to the created temporary voice channel
+        await member.move_to(temp_vc)
 
     # Case 2: User leaves a temporary voice channel
     if before.channel and before.channel.id in temp_channels:
