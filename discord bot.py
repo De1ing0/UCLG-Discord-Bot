@@ -419,6 +419,7 @@ class DeliveryAddressModal(discord.ui.Modal, title="Delivery Address"):
 @app_commands.command(name="create_verif", description="Create a verification button in a channel")
 @app_commands.checks.has_permissions(administrator=True)
 async def create_verif(interaction: discord.Interaction, channel: discord.TextChannel):
+    print(f"[CREATE_VERIF] interaction_id={interaction.id} user={interaction.user.id}")
     embed = discord.Embed(
         title="Membership Verification",
         description="Click the button below to verify your membership status.",
@@ -437,6 +438,7 @@ bot.tree.add_command(create_verif)
 # Check for already created parent voice channels in case of a restart/failure
 @bot.event
 async def on_voice_state_update(member, before, after):
+    print(f"[VC EVENT] member={member.id} before={before.channel.id if before.channel else None} after={after.channel.id if after.channel else None}")
     # Case 1: User joins the Parent voice channel
     if after.channel and after.channel.id in lobby_channels:
         lobby_vc = after.channel
