@@ -132,6 +132,7 @@ class EmbedItemPage(discord.ui.View):
 
     @discord.ui.button(label="Buy", style=discord.ButtonStyle.blurple, emoji="🛍️", custom_id="buy_button", row=1)
     async def my_button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
         guild = interaction.guild
         user = interaction.user
         guild_id = guild.id
@@ -147,7 +148,7 @@ class EmbedItemPage(discord.ui.View):
         channel_name = f"≫・{user.name}'s-order-{safe_item_name}"
         new_channel = await guild.create_text_channel(name=channel_name, overwrites=overwrites, category=category)
         
-        await interaction.response.send_message(f"Order channel created: {new_channel.mention}", ephemeral=True)
+        await interaction.followup.send(f"Order channel created: {new_channel.mention}", ephemeral=True)
         
         # Show delivery address form embed with button
         delivery_embed = discord.Embed(
@@ -263,6 +264,7 @@ class VerificationButton(discord.ui.View):
 
     @discord.ui.button(label="Verify Membership", style=discord.ButtonStyle.green, emoji="✅", custom_id="verify_membership")
     async def verify_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
         user = interaction.user
         guild = interaction.guild
         guild_id = guild.id
@@ -270,7 +272,7 @@ class VerificationButton(discord.ui.View):
         # Get category from guild settings
         category_id = get_guild_setting(guild_id, "category_id")
         if not category_id:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "Server not configured. Admin needs to run `/configure_bot` first.",
                 ephemeral=False
             )
@@ -289,7 +291,7 @@ class VerificationButton(discord.ui.View):
             category=guild.get_channel(category_id)
         )
         
-        await interaction.response.send_message(f"Verification channel created: {verif_channel.mention}", ephemeral=True)
+        await interaction.followup.send(f"Verification channel created: {verif_channel.mention}", ephemeral=True)
         
         # Send form to verification channel
         verif_embed = discord.Embed(
@@ -319,7 +321,7 @@ class FullNameModal(discord.ui.Modal, title="Membership Verification"):
 
     async def on_submit(self, interaction: discord.Interaction):
         user = interaction.user
-        guild_id = self.channel.guild.id
+        guild_id = interaction.guild.id
         
         # Get admin channel from guild settings
         admin_channel_id = get_guild_setting(guild_id, "admin_channel_id")
@@ -337,7 +339,7 @@ class FullNameModal(discord.ui.Modal, title="Membership Verification"):
                 f"**New Verification Request**\n"
                 f"User: {user.mention}\n"
                 f"Full Name: {self.full_name.value}\n"
-                f"Verification Channel: {self.channel.mention}"
+                f"Verification Channel: {interaction.channel.mention}"
             )
         
         await interaction.response.send_message(
@@ -376,7 +378,7 @@ class DeliveryAddressModal(discord.ui.Modal, title="Delivery Address"):
         self.admin_user_id = admin_user_id
 
     async def on_submit(self, interaction: discord.Interaction):
-        guild_id = self.channel.guild.id
+        guild_id = interaction.guild.id
         
         sort_code = get_guild_setting(guild_id, "sort_code")
         account_number = get_guild_setting(guild_id, "account_number")
@@ -393,7 +395,7 @@ class DeliveryAddressModal(discord.ui.Modal, title="Delivery Address"):
             address_embed.add_field(name="Apartment/Suite", value=self.apartment.value, inline=False)
         address_embed.add_field(name="ZIP Code", value=self.zip_code.value, inline=False)
         
-        address_message = await self.channel.send(embed=address_embed)
+        address_message = await interaction.channel.send(embed=address_embed)
         await address_message.pin()
         
         # Send payment button embed
@@ -409,7 +411,7 @@ class DeliveryAddressModal(discord.ui.Modal, title="Delivery Address"):
             color=discord.Color.gold()
         )
         payment_view = PaymentConfirmationView(self.item_name, self.admin_user_id)
-        await self.channel.send(embed=payment_embed, view=payment_view)
+        await interaction.channel.send(embed=payment_embed, view=payment_view)
         
         await interaction.response.send_message("Address saved. Payment details sent to channel.", ephemeral=True)
 
