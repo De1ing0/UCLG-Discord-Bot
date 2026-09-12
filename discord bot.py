@@ -93,14 +93,44 @@ class DeliveryAddressView(discord.ui.View):
         modal = DeliveryAddressModal(self.channel, self.item_name, self.admin_user_id)
         await interaction.response.send_modal(modal)
 
+
+class VariantSelect(discord.ui.Select):
+    def __init__(self, variants: dict):
+        self.variants = variants
+        options = [
+            discord.SelectOption(label=name, description=f"View {name} variant")
+            for name in list(variants.keys())[:25] # Hard cap at 25 options
+        ]
+        super().__init__(
+            placeholder="🎨 Choose a color or variant...", 
+            min_values=1, 
+            max_values=1, 
+            options=options,
+            row=0 # Places the dropdown above the Buy button
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        # Get the URL associated with the selected variant name
+        selected_name = self.values[0]
+        selected_url = self.variants[selected_name]
+        
+        # Grab the existing embed, update the image, and edit the message
+        embed = interaction.message.embeds[0]
+        embed.set_image(url=selected_url)
+        await interaction.response.edit_message(embed=embed)
+
+
 # Payment button
 class EmbedItemPage(discord.ui.View):
-    def __init__(self, item_name: str, admin_user_id: int):
+    def __init__(self, item_name: str, admin_user_id: int, variants: dict = None):
         super().__init__(timeout=None)
         self.item_name = item_name
         self.admin_user_id = admin_user_id
 
-    @discord.ui.button(label="Buy", style=discord.ButtonStyle.blurple, emoji="🛍️", custom_id="buy_button")
+        if variants:
+            self.add_item(VariantSelect(variants))
+
+    @discord.ui.button(label="Buy", style=discord.ButtonStyle.blurple, emoji="🛍️", custom_id="buy_button", row=1)
     async def my_button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
         guild = interaction.guild
         user = interaction.user
@@ -172,14 +202,23 @@ async def create_item(
     shop_channel: discord.TextChannel,
     item_name: str,
     price: float,
-    image_url: str,
-    description: str
+    description: str,
+    main_image_url: str,
+    variants: str = None
 ):
+    # Parse the input string: "Red|url1.png, Blue|url2.png"
+    variant_dict = {}
+    if variants:
+        pairs = variants.split(',')
+        for pair in pairs:
+            if '|' in pair:
+                name, url = pair.split('|', 1)
+                variant_dict[name.strip()] = url.strip()
     embed = discord.Embed(title=item_name, color=discord.Color.blue())
     embed.add_field(name="Price", value=f"£{price}", inline=False)
     embed.add_field(name="Description", value=description, inline=False)
-    embed.set_image(url=image_url)
-    view = EmbedItemPage(item_name=item_name, admin_user_id=admin_user.id)
+    embed.set_image(url=main_image_url)
+    view = EmbedItemPage(item_name=item_name, admin_user_id=admin_user.id, variants=variant_dict)
 
     try:
         await shop_channel.send(embed=embed, view=view)
@@ -256,7 +295,7 @@ class VerificationButton(discord.ui.View):
         # Send form to verification channel
         verif_embed = discord.Embed(
             title="Membership Verification",
-            description="Please provide your name and surname so admin can verify your membership status.",
+            description="Please provide your full name so admin can verify your membership status.",
             color=discord.Color.blue()
         )
         verif_form = VerificationForm(verif_channel)
@@ -268,13 +307,12 @@ class VerificationForm(discord.ui.View):
         super().__init__(timeout=None)
         self.channel = channel
 
-    @discord.ui.button(label="Submit Name & Surname", style=discord.ButtonStyle.blurple, emoji="📝", custom_id="submit_verification")
+    @discord.ui.button(label="Submit Full Name", style=discord.ButtonStyle.blurple, emoji="📝", custom_id="submit_verification")
     async def submit_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(NameSurnameModal(self.channel))
+        await interaction.response.send_modal(FullNameModal(self.channel))
 
-class NameSurnameModal(discord.ui.Modal, title="Membership Verification"):
-    name = discord.ui.TextInput(label="First Name", placeholder="Oliver", required=True)
-    surname = discord.ui.TextInput(label="Last Name", placeholder="Sykes", required=True)
+class FullNameModal(discord.ui.Modal, title="Membership Verification"):
+    full_name = discord.ui.TextInput(label="Full Name", placeholder="Oliver Sykes", required=True)
 
     def __init__(self, channel: discord.TextChannel):
         super().__init__()
@@ -299,8 +337,7 @@ class NameSurnameModal(discord.ui.Modal, title="Membership Verification"):
             await admin_channel.send(
                 f"**New Verification Request**\n"
                 f"User: {user.mention}\n"
-                f"Name: {self.name.value}\n"
-                f"Surname: {self.surname.value}\n"
+                f"Full Name: {self.full_name.value}\n"
                 f"Verification Channel: {self.channel.mention}"
             )
         
@@ -311,14 +348,9 @@ class NameSurnameModal(discord.ui.Modal, title="Membership Verification"):
 
 # Delivery address form create button
 class DeliveryAddressModal(discord.ui.Modal, title="Delivery Address"):
-    first_name = discord.ui.TextInput(
-        label="First Name",
-        placeholder="Oliver",
-        required=True
-    )
-    last_name = discord.ui.TextInput(
-        label="Last Name",
-        placeholder="Sykes",
+    full_name = discord.ui.TextInput(
+        label="Full Name",
+        placeholder="Oliver Sykes",
         required=True
     )
     street_address = discord.ui.TextInput(
@@ -356,7 +388,7 @@ class DeliveryAddressModal(discord.ui.Modal, title="Delivery Address"):
             title="📦 Delivery Address",
             color=discord.Color.green()
         )
-        address_embed.add_field(name="Name", value=f"{self.first_name.value} {self.last_name.value}", inline=False)
+        address_embed.add_field(name="Name", value=self.full_name.value, inline=False)
         address_embed.add_field(name="Address", value=self.street_address.value, inline=False)
         if self.apartment.value:
             address_embed.add_field(name="Apartment/Suite", value=self.apartment.value, inline=False)
