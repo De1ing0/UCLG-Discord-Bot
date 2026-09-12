@@ -176,14 +176,13 @@ async def on_ready():
     load_guild_settings()
 
     # Verify all saved channels still exist in Discord
-    for guild in bot.guilds:
-        channels_to_remove = []
-        for channel_id in list(lobby_channels.keys()):
-            channel = guild.get_channel(channel_id)
-            if channel is None:
-                # Channel was deleted, remove from tracking
-                channels_to_remove.append(channel_id)
-                print(f"Parent voice channel {channel_id} not found, removing from memory")
+    channels_to_remove = []
+    for channel_id in list(lobby_channels.keys()):
+        channel = bot.get_channel(channel_id)
+        if channel is None:
+            # Channel was deleted, remove from tracking
+            channels_to_remove.append(channel_id)
+            print(f"Parent voice channel {channel_id} not found, removing from memory")
         # Remove deleted channels
         for channel_id in channels_to_remove:
             lobby_channels.pop(channel_id, None)
