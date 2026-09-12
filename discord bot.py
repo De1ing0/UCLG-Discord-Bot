@@ -438,7 +438,7 @@ bot.tree.add_command(create_verif)
 # Check for already created parent voice channels in case of a restart/failure
 @bot.event
 async def on_voice_state_update(member, before, after):
-    print(f"[VC EVENT] member={member.id} before={before.channel.id if before.channel else None} after={after.channel.id if after.channel else None}")
+    print(f"[VC EVENT] member={member.id} before={before.channel.id if before.channel else None} after={after.channel.id if after.channel else None} case1_match={after.channel.id in lobby_channels if after.channel else False} case2_match={before.channel.id in temp_channels if before.channel else False} lobby_keys={list(lobby_channels.keys())}")
     # Case 1: User joins the Parent voice channel
     if after.channel and after.channel.id in lobby_channels:
         lobby_vc = after.channel
