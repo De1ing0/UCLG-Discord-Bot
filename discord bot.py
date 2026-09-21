@@ -102,7 +102,7 @@ class VariantSelect(discord.ui.Select):
             for name in list(variants.keys())[:25] # Hard cap at 25 options
         ]
         super().__init__(
-            placeholder="🎨 Choose a color or variant...", 
+            placeholder="🎨 Choose a colour or variant...", 
             min_values=1, 
             max_values=1, 
             options=options,
@@ -112,12 +112,21 @@ class VariantSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction):
         # Get the URL associated with the selected variant name
         selected_name = self.values[0]
-        selected_url = self.variants[selected_name]
-        
-        # Grab the existing embed, update the image, and edit the message
-        embed = interaction.message.embeds[0]
-        embed.set_image(url=selected_url)
-        await interaction.response.edit_message(embed=embed)
+        url1, url2 = self.variants[selected_name]
+
+        embeds = interaction.message.embeds
+        embeds[0].set_image(url=url1)
+
+        if url2:
+            if len(embeds) > 1:
+                embeds[1].set_image(url=url2)
+            else:
+                second_embed = discord.Embed(color=discord.Color.blue(), url=embeds[0].url)
+                second_embed.set_image(url=url2)
+                embeds.append(second_embed)
+        elif len(embeds) > 1:
+            embeds = [embeds[0]]
+        await interaction.response.edit_message(embeds=embeds)
 
 
 # Payment button
@@ -165,6 +174,7 @@ class EmbedItemPage(discord.ui.View):
 async def on_ready():  
     global lobby_channels
     print('Bot online')
+    print('Updated 21.09.26 13:20')
 
     bot.add_view(EmbedItemPage("temp", 0))
     bot.add_view(PaymentConfirmationView("temp", 0))
@@ -204,6 +214,7 @@ async def create_item(
     price: float,
     description: str,
     main_image_url: str,
+    second_image_url: str = None,
     variants: str = None
 ):
     # Parse the input string: "Red|url1.png, Blue|url2.png"
@@ -211,17 +222,29 @@ async def create_item(
     if variants:
         pairs = variants.split(',')
         for pair in pairs:
-            if '|' in pair:
-                name, url = pair.split('|', 1)
-                variant_dict[name.strip()] = url.strip()
-    embed = discord.Embed(title=item_name, color=discord.Color.blue())
+            parts = pair.split('|')
+            if len(parts) >= 2:
+                name = parts[0].strip()
+                url1 = parts[1].strip()
+                url2 = parts[2].strip() if len(parts) >= 3 else None
+                variant_dict[name] = (url1, url2)
+    gallery_url = f"https://item.local/{item_name.lower().replace(' ', '-')}"
+
+    embed = discord.Embed(title=item_name, color=discord.Color.blue(), url=gallery_url)
     embed.add_field(name="Price", value=f"£{price}", inline=False)
     embed.add_field(name="Description", value=description, inline=False)
     embed.set_image(url=main_image_url)
+
+    embeds = [embed]
+    if second_image_url:
+        second_embed = discord.Embed(color=discord.Color.blue(), url=gallery_url)
+        second_embed.set_image(url=second_image_url)
+        embeds.append(second_embed)
+
     view = EmbedItemPage(item_name=item_name, admin_user_id=admin_user.id, variants=variant_dict)
 
     try:
-        await shop_channel.send(embed=embed, view=view)
+        await shop_channel.send(embeds=embeds, view=view)
         await interaction.response.send_message(f"Item posted to **{shop_channel.mention}**")
     except discord.Forbidden:
         await interaction.response.send_message(f"Bot doesn't have permission to send messages in **{shop_channel.mention}**.", ephemeral=True)
@@ -286,7 +309,7 @@ class VerificationButton(discord.ui.View):
         }
         
         verif_channel = await guild.create_text_channel(
-            name=f"{user.name}'s-verification",
+            name=f"≫・{user.name}'s-verification",
             overwrites=overwrites,
             category=guild.get_channel(category_id)
         )
