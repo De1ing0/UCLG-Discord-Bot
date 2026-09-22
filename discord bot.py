@@ -94,6 +94,17 @@ class DeliveryAddressView(discord.ui.View):
         await interaction.response.send_modal(modal)
 
 
+class CloseTicketView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="Close Ticket", style=discord.ButtonStyle.red, emoji="❌", custom_id="close_ticket")
+    async def close_ticket_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message("This ticket will be closed in 3 seconds.", ephemeral=True)
+        await discord.utils.sleep_until(discord.utils.utcnow() + discord.utils.timedelta(seconds=3))
+        await interaction.channel.delete()
+
+
 class VariantSelect(discord.ui.Select):
     def __init__(self, variants: dict):
         self.variants = variants
@@ -113,6 +124,7 @@ class VariantSelect(discord.ui.Select):
         # Get the URL associated with the selected variant name
         selected_name = self.values[0]
         url1, url2 = self.variants[selected_name]
+        self.view.selected_variant = selected_name
 
         embeds = interaction.message.embeds
         embeds[0].set_image(url=url1)
@@ -135,6 +147,7 @@ class EmbedItemPage(discord.ui.View):
         super().__init__(timeout=None)
         self.item_name = item_name
         self.admin_user_id = admin_user_id
+        self.selected_variant = None
 
         if variants:
             self.add_item(VariantSelect(variants))
@@ -165,8 +178,11 @@ class EmbedItemPage(discord.ui.View):
             description="Please provide your delivery address to continue.",
             color=discord.Color.blue()
         )
+        if self.selected_variant:
+            delivery_embed.add_field(name="Selected colour", value=self.selected_variant, inline=False)
         delivery_view = DeliveryAddressView(new_channel, self.item_name, self.admin_user_id)
         await new_channel.send(content=user.mention, embed=delivery_embed, view=delivery_view)
+        await new_channel.send(embed=discord.Embed(description="You can close this ticket at any time.", color=discord.Color.red()), view=CloseTicketView())
 
 
 # Startup + debug notifications
@@ -181,6 +197,7 @@ async def on_ready():
     bot.add_view(VerificationButton())
     bot.add_view(VerificationForm(None))
     bot.add_view(DeliveryAddressView(None, "temp", 0))
+    bot.add_view(CloseTicketView())
 
     # Load saved lobby channels
     load_lobby_channels()
@@ -324,6 +341,7 @@ class VerificationButton(discord.ui.View):
         )
         verif_form = VerificationForm(verif_channel)
         await verif_channel.send(content=user.mention, embed=verif_embed, view=verif_form)
+        await verif_channel.send(embed=discord.Embed(description="You can close this ticket at any time.", color=discord.Color.red()), view=CloseTicketView())
 
 # Verification submition form
 class VerificationForm(discord.ui.View):
