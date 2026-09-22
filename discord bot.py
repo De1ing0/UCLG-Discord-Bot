@@ -100,8 +100,7 @@ class CloseTicketView(discord.ui.View):
 
     @discord.ui.button(label="Close Ticket", style=discord.ButtonStyle.red, emoji="❌", custom_id="close_ticket")
     async def close_ticket_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message("This ticket will be closed in 3 seconds.", ephemeral=True)
-        await discord.utils.sleep_until(discord.utils.utcnow() + discord.utils.timedelta(seconds=3))
+        await interaction.response.send_message("Closing this ticket...")
         await interaction.channel.delete()
 
 
@@ -190,7 +189,7 @@ class EmbedItemPage(discord.ui.View):
 async def on_ready():  
     global lobby_channels
     print('Bot online')
-    print('Updated 21.09.26 13:20')
+    print('Updated 22.09.26 15:16')
 
     bot.add_view(EmbedItemPage("temp", 0))
     bot.add_view(PaymentConfirmationView("temp", 0))
