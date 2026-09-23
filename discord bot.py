@@ -14,11 +14,9 @@ prefix = os.getenv('command_prefix', 'pdg!')  # Default prefix if not set in .en
 # Get information from lobby_channels.json file if it exists
 LOBBY_DATA_FILE = "lobby_channels.json"
 def save_lobby_channels():
-    # Save lobby channels to JSON file in case of a failure or restart
     with open(LOBBY_DATA_FILE, 'w') as f:
         json.dump(lobby_channels, f, indent=2)
 def load_lobby_channels():
-    # Load lobby channels from JSON file if it exists to restore state after a bot restart
     global lobby_channels
     if Path(LOBBY_DATA_FILE).exists():
         with open(LOBBY_DATA_FILE, 'r') as f:
@@ -26,21 +24,27 @@ def load_lobby_channels():
             # Convert string keys back to integers (JSON keys are always strings)
             lobby_channels = {int(k): v for k, v in lobby_channels.items()}
 
-
 GUILD_SETTINGS_FILE = "guild_settings.json"
-
 def save_guild_settings():
-    # Save guild settings to JSON file
     with open(GUILD_SETTINGS_FILE, 'w') as f:
         json.dump(guild_settings, f, indent=2)
-
 def load_guild_settings():
-    # Load guild settings from JSON file
     global guild_settings
     if Path(GUILD_SETTINGS_FILE).exists():
         with open(GUILD_SETTINGS_FILE, 'r') as f:
             data = json.load(f)
             guild_settings = {int(k): v for k, v in data.items()}
+
+ITEMS_DATA_FILE = "items.json"
+def save_items():
+    with open(ITEMS_DATA_FILE, 'w') as f:
+        json.dump(items, f, indent=2)
+def load_items():
+    global items
+    if Path(ITEMS_DATA_FILE).exists():
+        with open(ITEMS_DATA_FILE, 'r') as f:
+            data = json.load(f)
+            items = {int(k): v for k, v in data.items()}
 
 def get_guild_setting(guild_id, setting_key, default=None):
     # Get a specific setting for a guild
@@ -55,6 +59,7 @@ bot = commands.Bot(command_prefix=prefix, intents=discord.Intents.all())
 lobby_channels = {}  # Maps lobby channel IDs to role IDs
 temp_channels = {}   # Maps temporary channel IDs to their corresponding lobby channel IDs
 guild_settings = {}  # Maps guild IDs to their settings
+items = {}           # Maps item names to their details (price, description, images)
 
 
 # Payment confirmation button
@@ -82,11 +87,12 @@ class PaymentConfirmationView(discord.ui.View):
 
 # Delivery address input form
 class DeliveryAddressView(discord.ui.View):
-    def __init__(self, channel: discord.TextChannel, item_name: str, admin_user_id: int):
+    def __init__(self, channel: discord.TextChannel, item_name: str, admin_user_id: int, price: float):
         super().__init__(timeout=None)
         self.channel = channel
         self.item_name = item_name
         self.admin_user_id = admin_user_id
+        self.price = price
 
     @discord.ui.button(label="Add Delivery Address", style=discord.ButtonStyle.blurple, emoji="📍", custom_id="add_delivery_address")
     async def delivery_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -98,7 +104,7 @@ class CloseTicketView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="Close Ticket", style=discord.ButtonStyle.red, emoji="❌", custom_id="close_ticket")
+    @discord.ui.button(label="Close Ticket", style=discord.ButtonStyle.red, emoji="🔒", custom_id="close_ticket")
     async def close_ticket_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message("Closing this ticket...")
         await interaction.channel.delete()
@@ -112,11 +118,12 @@ class VariantSelect(discord.ui.Select):
             for name in list(variants.keys())[:25] # Hard cap at 25 options
         ]
         super().__init__(
-            placeholder="🎨 Choose a colour or variant...", 
+            placeholder="Choose a colour", 
             min_values=1, 
             max_values=1, 
             options=options,
-            row=0 # Places the dropdown above the Buy button
+            row=0, # Places the dropdown above the Buy button
+            custom_id="variant_select"
         )
 
     async def callback(self, interaction: discord.Interaction):
@@ -142,12 +149,12 @@ class VariantSelect(discord.ui.Select):
 
 # Payment button
 class EmbedItemPage(discord.ui.View):
-    def __init__(self, item_name: str, admin_user_id: int, variants: dict = None):
+    def __init__(self, item_name: str, admin_user_id: int, price:float = 0.0, variants: dict = None):
         super().__init__(timeout=None)
         self.item_name = item_name
         self.admin_user_id = admin_user_id
+        self.price = price
         self.selected_variant = None
-
         if variants:
             self.add_item(VariantSelect(variants))
 
@@ -179,7 +186,7 @@ class EmbedItemPage(discord.ui.View):
         )
         if self.selected_variant:
             delivery_embed.add_field(name="Selected colour", value=self.selected_variant, inline=False)
-        delivery_view = DeliveryAddressView(new_channel, self.item_name, self.admin_user_id)
+        delivery_view = DeliveryAddressView(new_channel, self.item_name, self.admin_user_id, self.price)
         await new_channel.send(content=user.mention, embed=delivery_embed, view=delivery_view)
         await new_channel.send(embed=discord.Embed(description="You can close this ticket at any time.", color=discord.Color.red()), view=CloseTicketView())
 
@@ -189,7 +196,7 @@ class EmbedItemPage(discord.ui.View):
 async def on_ready():  
     global lobby_channels
     print('Bot online')
-    print('Updated 22.09.26 15:16')
+    print('Updated 23.09.26 11:28 амина с днем рождения')
 
     bot.add_view(EmbedItemPage("temp", 0))
     bot.add_view(PaymentConfirmationView("temp", 0))
@@ -198,9 +205,19 @@ async def on_ready():
     bot.add_view(DeliveryAddressView(None, "temp", 0))
     bot.add_view(CloseTicketView())
 
-    # Load saved lobby channels
+    # Load saved data from JSON files
     load_lobby_channels()
     load_guild_settings()
+    load_items()
+
+    for message_id, item_data in items.items():
+        item_view = EmbedItemPage(
+            item_name=item_data["item_name"],
+            admin_user_id=item_data["admin_user_id"],
+            price=item_data.get("price", 0),
+            variants=item_data.get("variants")
+        )
+        bot.add_view(item_view, message_id=message_id)
 
     # Verify all saved channels still exist in Discord
     channels_to_remove = []
@@ -233,7 +250,7 @@ async def create_item(
     second_image_url: str = None,
     variants: str = None
 ):
-    # Parse the input string: "Red|url1.png, Blue|url2.png"
+    # Parse the input string: "Red|url1.png|url2.png, Blue|url3.png"
     variant_dict = {}
     if variants:
         pairs = variants.split(',')
@@ -248,7 +265,7 @@ async def create_item(
 
     embed = discord.Embed(title=item_name, color=discord.Color.blue(), url=gallery_url)
     embed.add_field(name="Price", value=f"£{price}", inline=False)
-    embed.add_field(name="Description", value=description, inline=False)
+    embed.add_field(name="Sizes", value=description, inline=False)
     embed.set_image(url=main_image_url)
 
     embeds = [embed]
@@ -257,10 +274,17 @@ async def create_item(
         second_embed.set_image(url=second_image_url)
         embeds.append(second_embed)
 
-    view = EmbedItemPage(item_name=item_name, admin_user_id=admin_user.id, variants=variant_dict)
+    view = EmbedItemPage(item_name=item_name, admin_user_id=admin_user.id, price=price, variants=variant_dict)
 
     try:
-        await shop_channel.send(embeds=embeds, view=view)
+        sent_message = await shop_channel.send(embeds=embeds, view=view)
+        items[sent_message.id] = {
+            "item_name": item_name,
+            "admin_user_id": admin_user.id,
+            "price": price,
+            "variants": variant_dict,
+        }
+        save_items()
         await interaction.response.send_message(f"Item posted to **{shop_channel.mention}**")
     except discord.Forbidden:
         await interaction.response.send_message(f"Bot doesn't have permission to send messages in **{shop_channel.mention}**.", ephemeral=True)
@@ -275,7 +299,7 @@ async def setup_vc(
     role: discord.Role,
     category: discord.CategoryChannel
 ):
-    # Creates a parent voice channel that is only visible/joinable by a specific role
+    # Creates a parent voice channel for a specific role
     overwrites = {
         interaction.guild.default_role: discord.PermissionOverwrite(view_channel=False, connect=False),
         role: discord.PermissionOverwrite(view_channel=True, connect=True),
@@ -354,16 +378,12 @@ class VerificationForm(discord.ui.View):
 
 class FullNameModal(discord.ui.Modal, title="Membership Verification"):
     full_name = discord.ui.TextInput(label="Full Name", placeholder="Oliver Sykes", required=True)
-
     def __init__(self, channel: discord.TextChannel):
         super().__init__()
         self.channel = channel
-
     async def on_submit(self, interaction: discord.Interaction):
         user = interaction.user
-        guild_id = interaction.guild.id
-        
-        # Get admin channel from guild settings
+        guild_id = interaction.guild.id  
         admin_channel_id = get_guild_setting(guild_id, "admin_channel_id")
         if not admin_channel_id:
             await interaction.response.send_message(
@@ -411,11 +431,12 @@ class DeliveryAddressModal(discord.ui.Modal, title="Delivery Address"):
         required=True
     )
 
-    def __init__(self, channel: discord.TextChannel, item_name: str, admin_user_id: int):
+    def __init__(self, channel: discord.TextChannel, item_name: str, admin_user_id: int, price: float):
         super().__init__()
         self.channel = channel
         self.item_name = item_name
         self.admin_user_id = admin_user_id
+        self.price = price
 
     async def on_submit(self, interaction: discord.Interaction):
         guild_id = interaction.guild.id
@@ -443,6 +464,7 @@ class DeliveryAddressModal(discord.ui.Modal, title="Delivery Address"):
             title=f"💸 Payment for {self.item_name}",
             description=(
                 "Your delivery address has been saved. Now proceed with payment.\n\n"
+                f"**Amount to pay:** £{self.price}+3 for shipping\n"
                 f"**Sort code:** {sort_code}\n"
                 f"**Account number:** {account_number}\n"
                 f"**Name**: {name_on_account}\n\n"
@@ -450,7 +472,7 @@ class DeliveryAddressModal(discord.ui.Modal, title="Delivery Address"):
             ),
             color=discord.Color.gold()
         )
-        payment_view = PaymentConfirmationView(self.item_name, self.admin_user_id)
+        payment_view = PaymentConfirmationView(self.item_name, self.admin_user_id, self.price)
         await interaction.channel.send(embed=payment_embed, view=payment_view)
         
         await interaction.response.send_message("Address saved. Payment details sent to channel.", ephemeral=True)
@@ -478,7 +500,6 @@ bot.tree.add_command(create_verif)
 # Check for already created parent voice channels in case of a restart/failure
 @bot.event
 async def on_voice_state_update(member, before, after):
-    print(f"[VC EVENT] member={member.id} before={before.channel.id if before.channel else None} after={after.channel.id if after.channel else None} case1_match={after.channel.id in lobby_channels if after.channel else False} case2_match={before.channel.id in temp_channels if before.channel else False} lobby_keys={list(lobby_channels.keys())}")
     # Case 1: User joins the Parent voice channel
     if after.channel and after.channel.id in lobby_channels:
         lobby_vc = after.channel
@@ -592,7 +613,6 @@ bot.tree.add_command(configure_payment)
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def sync(ctx):
-    # Sync slash commands with Discord client
     try:
         synced = await bot.tree.sync()
         await ctx.send(f"Synced {len(synced)} command(s)")
