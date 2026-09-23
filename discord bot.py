@@ -97,7 +97,7 @@ class DeliveryAddressView(discord.ui.View):
 
     @discord.ui.button(label="Add Delivery Address", style=discord.ButtonStyle.blurple, emoji="📍", custom_id="add_delivery_address")
     async def delivery_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
-        modal = DeliveryAddressModal(self.channel, self.item_name, self.admin_user_id)
+        modal = DeliveryAddressModal(self.channel, self.item_name, self.admin_user_id, self.price)
         await interaction.response.send_modal(modal)
 
 
