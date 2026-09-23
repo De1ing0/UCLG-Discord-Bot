@@ -1,6 +1,7 @@
 lobby_channels.json
 guild_settings.json
 .DS_Store
+items.json
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
