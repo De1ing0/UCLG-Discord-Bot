@@ -64,10 +64,11 @@ items = {}           # Maps item names to their details (price, description, ima
 
 # Payment confirmation button
 class PaymentConfirmationView(discord.ui.View):
-    def __init__(self, item_name: str, admin_user_id: int):
+    def __init__(self, item_name: str, admin_user_id: int, price: float = 0.0):
         super().__init__(timeout=None)
         self.item_name = item_name
         self.admin_user_id = admin_user_id
+        self.price = price
 
     @discord.ui.button(label="Payment Completed", style=discord.ButtonStyle.green, emoji="✅", custom_id="payment_completed")
     async def confirm_payment_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -202,7 +203,7 @@ async def on_ready():
     bot.add_view(PaymentConfirmationView("temp", 0))
     bot.add_view(VerificationButton())
     bot.add_view(VerificationForm(None))
-    bot.add_view(DeliveryAddressView(None, "temp", 0))
+    bot.add_view(DeliveryAddressView(None, "temp", 0, 0.0))
     bot.add_view(CloseTicketView())
 
     # Load saved data from JSON files
