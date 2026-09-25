@@ -5,6 +5,7 @@ from discord.ext import commands
 from discord import app_commands
 import json
 from pathlib import Path
+from datetime import datetime
 
 # Get information from .env file
 load_dotenv()
@@ -150,14 +151,27 @@ class VariantSelect(discord.ui.Select):
 
 # Payment button
 class EmbedItemPage(discord.ui.View):
-    def __init__(self, item_name: str, admin_user_id: int, price:float = 0.0, variants: dict = None):
+    def __init__(self, item_name: str, admin_user_id: int, price:float = 0.0, variants: dict = None, discount_price: float = None, discount_until: str = None):
         super().__init__(timeout=None)
         self.item_name = item_name
         self.admin_user_id = admin_user_id
         self.price = price
+        self.discount_price = discount_price
+        self.discount_until = discount_until
         self.selected_variant = None
         if variants:
             self.add_item(VariantSelect(variants))
+
+    def get_effective_price(self):
+    # Returns the discounted price only if a discount is set and hasn't expired
+        if self.discount_price is not None and self.discount_until:
+            try:
+                until = datetime.strptime(self.discount_until, "%Y-%m-%d").date()
+                if datetime.now().date() <= until:
+                    return self.discount_price
+            except ValueError:
+                pass
+        return self.price
 
     @discord.ui.button(label="Buy", style=discord.ButtonStyle.blurple, emoji="🛍️", custom_id="buy_button", row=1)
     async def my_button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -166,6 +180,7 @@ class EmbedItemPage(discord.ui.View):
         user = interaction.user
         guild_id = guild.id
         category_id = get_guild_setting(guild_id, "category_id")
+        effective_price = self.get_effective_price()
         
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(read_messages=False),
@@ -187,7 +202,7 @@ class EmbedItemPage(discord.ui.View):
         )
         if self.selected_variant:
             delivery_embed.add_field(name="Selected colour", value=self.selected_variant, inline=False)
-        delivery_view = DeliveryAddressView(new_channel, self.item_name, self.admin_user_id, self.price)
+        delivery_view = DeliveryAddressView(new_channel, self.item_name, self.admin_user_id, effective_price)
         await new_channel.send(content=user.mention, embed=delivery_embed, view=delivery_view)
         await new_channel.send(embed=discord.Embed(description="You can close this ticket at any time.", color=discord.Color.red()), view=CloseTicketView())
 
@@ -216,7 +231,9 @@ async def on_ready():
             item_name=item_data["item_name"],
             admin_user_id=item_data["admin_user_id"],
             price=item_data.get("price", 0),
-            variants=item_data.get("variants")
+            variants=item_data.get("variants"),
+            discount_price=item_data.get("discount_price"),
+            discount_until=item_data.get("discount_until")
         )
         bot.add_view(item_view, message_id=message_id)
 
@@ -284,12 +301,83 @@ async def create_item(
             "admin_user_id": admin_user.id,
             "price": price,
             "variants": variant_dict,
+            "discount_price": None,
+            "discount_until": None,
+            "channel_id": shop_channel.id
         }
         save_items()
         await interaction.response.send_message(f"Item posted to **{shop_channel.mention}**")
     except discord.Forbidden:
         await interaction.response.send_message(f"Bot doesn't have permission to send messages in **{shop_channel.mention}**.", ephemeral=True)
 bot.tree.add_command(create_item)
+
+
+@app_commands.command(name="set_discount", description="Set a discount on an item by its new price (not a percentage)")
+@app_commands.checks.has_permissions(administrator=True)
+async def set_discount(
+    interaction: discord.Interaction,
+    item_name: str,
+    discounted_price: float,
+    active_until: str
+):
+    try:
+        until_date_check = datetime.strptime(active_until.strip(), "%Y-%m-%d").date()
+    except ValueError:
+        await interaction.response.send_message("Please provide the date as YYYY-MM-DD, e.g. 2026-10-01.", ephemeral=True)
+        return
+
+    # Find the tracked item by name (case-insensitive)
+    match = None
+    for message_id, data in items.items():
+        if data["item_name"].lower() == item_name.lower():
+            match = (message_id, data)
+            break
+
+    if not match:
+        await interaction.response.send_message(f"Couldn't find an active item listing called **{item_name}**.", ephemeral=True)
+        return
+    message_id, item_data = match
+    channel = bot.get_channel(item_data.get("channel_id"))
+    if channel is None:
+        await interaction.response.send_message("Couldn't find this item's shop channel — it may have been created before discounts were supported. Try re-posting the item.", ephemeral=True)
+        return
+    try:
+        message = await channel.fetch_message(message_id)
+    except discord.NotFound:
+        await interaction.response.send_message("This item's message no longer exists.", ephemeral=True)
+        return
+
+    original_price = item_data["price"]
+    item_data["discount_price"] = discounted_price
+    item_data["discount_until"] = active_until.strip()
+    save_items()
+
+    # Update the visible price field on the item's embed
+    embeds = message.embeds
+    embeds[0].set_field_at(
+        0,
+        name="Price",
+        value=f"~~£{original_price}~~ **£{discounted_price}** (until {active_until.strip()})",
+        inline=False
+    )
+    await message.edit(embeds=embeds)
+
+    # Hot-swap the live view so the discount takes effect immediately, no restart needed
+    new_view = EmbedItemPage(
+        item_name=item_data["item_name"],
+        admin_user_id=item_data["admin_user_id"],
+        price=original_price,
+        variants=item_data.get("variants"),
+        discount_price=discounted_price,
+        discount_until=active_until.strip()
+    )
+    bot.add_view(new_view, message_id=message_id)
+
+    await interaction.response.send_message(
+        f"Discount set on **{item_data['item_name']}**: £{original_price} → £{discounted_price}, until {active_until.strip()}.",
+        ephemeral=True
+    )
+bot.tree.add_command(set_discount)
 
 
 # Create a parent voice channel for a certain role command
