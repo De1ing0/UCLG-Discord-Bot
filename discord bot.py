@@ -323,7 +323,7 @@ async def set_discount(
     try:
         until_date_check = datetime.strptime(active_until.strip(), "%d-%m-%Y").date()
     except ValueError:
-        await interaction.response.send_message("Please provide the date as DD-MM-YYYY, e.g. 01-10-2026.")
+        await interaction.response.send_message("Please provide the date as DD-MM-YYYY, e.g. 09-06-2023.")
         return
 
     # Find the tracked item by name (case-insensitive)
@@ -374,9 +374,7 @@ async def set_discount(
     bot.add_view(new_view, message_id=message_id)
 
     await interaction.response.send_message(
-        f"Discount set on **{item_data['item_name']}**: £{original_price} → £{discounted_price}, until {active_until.strip()}.",
-        ephemeral=True
-    )
+        f"Discount set on **{item_data['item_name']}**: £{original_price} → £{discounted_price}, until {active_until.strip()}.")
 bot.tree.add_command(set_discount)
 
 
