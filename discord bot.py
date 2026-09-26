@@ -212,7 +212,7 @@ class EmbedItemPage(discord.ui.View):
 async def on_ready():  
     global lobby_channels
     print('Bot online')
-    print('Updated 25.09.26')
+    print('Updated 26.09.26 11:01')
 
     bot.add_view(EmbedItemPage("temp", 0))
     bot.add_view(PaymentConfirmationView("temp", 0))
