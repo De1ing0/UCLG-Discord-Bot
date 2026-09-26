@@ -166,7 +166,7 @@ class EmbedItemPage(discord.ui.View):
     # Returns the discounted price only if a discount is set and hasn't expired
         if self.discount_price is not None and self.discount_until:
             try:
-                until = datetime.strptime(self.discount_until, "%Y-%m-%d").date()
+                until = datetime.strptime(self.discount_until, "%d-%m-%Y").date()
                 if datetime.now().date() <= until:
                     return self.discount_price
             except ValueError:
@@ -212,7 +212,7 @@ class EmbedItemPage(discord.ui.View):
 async def on_ready():  
     global lobby_channels
     print('Bot online')
-    print('Updated 23.09.26 11:28 амина с днем рождения')
+    print('Updated 25.09.26')
 
     bot.add_view(EmbedItemPage("temp", 0))
     bot.add_view(PaymentConfirmationView("temp", 0))
@@ -321,9 +321,9 @@ async def set_discount(
     active_until: str
 ):
     try:
-        until_date_check = datetime.strptime(active_until.strip(), "%Y-%m-%d").date()
+        until_date_check = datetime.strptime(active_until.strip(), "%d-%m-%Y").date()
     except ValueError:
-        await interaction.response.send_message("Please provide the date as YYYY-MM-DD, e.g. 2026-10-01.", ephemeral=True)
+        await interaction.response.send_message("Please provide the date as DD-MM-YYYY, e.g. 01-10-2026.")
         return
 
     # Find the tracked item by name (case-insensitive)
@@ -334,17 +334,17 @@ async def set_discount(
             break
 
     if not match:
-        await interaction.response.send_message(f"Couldn't find an active item listing called **{item_name}**.", ephemeral=True)
+        await interaction.response.send_message(f"Couldn't find an active item listing called **{item_name}**.")
         return
     message_id, item_data = match
     channel = bot.get_channel(item_data.get("channel_id"))
     if channel is None:
-        await interaction.response.send_message("Couldn't find this item's shop channel — it may have been created before discounts were supported. Try re-posting the item.", ephemeral=True)
+        await interaction.response.send_message("Couldn't find this item's shop channel — it may have been created before discounts were supported. Try re-posting the item.")
         return
     try:
         message = await channel.fetch_message(message_id)
     except discord.NotFound:
-        await interaction.response.send_message("This item's message no longer exists.", ephemeral=True)
+        await interaction.response.send_message("This item's message no longer exists.")
         return
 
     original_price = item_data["price"]
